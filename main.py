@@ -1,0 +1,107 @@
+import asyncio
+import logging
+from aiohttp import web
+import json
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
+
+from bot.config import settings
+from bot.database import engine, Base, AsyncSessionFactory
+from bot.middlewares.db import DbSessionMiddleware
+from bot.middlewares.ban_check import BanCheckMiddleware
+from bot.middlewares.activity import ActivityMiddleware
+from bot.handlers import register_all_handlers
+from bot.services.reminder_service import ReminderService
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+async def on_startup(bot: Bot) -> None:
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables ensured.")
+    me = await bot.get_me()
+    logger.info(f"Bot started: @{me.username}")
+
+
+async def on_shutdown(bot: Bot) -> None:
+    logger.info("Shutting down...")
+    await engine.dispose()
+
+
+async def reminders_task(bot: Bot, interval_minutes: int = 60):
+    """Фоновая задача для отправки напоминаний"""
+    while True:
+        await asyncio.sleep(interval_minutes * 60)
+        try:
+            async with AsyncSessionFactory() as session:
+                reminder_svc = ReminderService(session, bot)
+                await reminder_svc.check_and_notify()
+        except Exception as e:
+            logger.error(f"Reminder task error: {e}")
+
+
+async def yookassa_webhook(request):
+    """Обработчик уведомлений от ЮKassa"""
+    try:
+        data = await request.json()
+        print(f"Webhook received: {data}")
+
+        # Проверяем, что это успешная оплата
+        if data.get('event') == 'payment.succeeded':
+            payment = data.get('object', {})
+            metadata = payment.get('metadata', {})
+            user_tg_id = metadata.get('user_tg_id')
+
+            if user_tg_id:
+                # Активируем подписку
+                from bot.services.premium_service import PremiumService
+                from bot.database import async_session_maker
+
+                async with async_session_maker() as session:
+                    premium_svc = PremiumService(session)
+                    await premium_svc.grant(int(user_tg_id), days=30)
+
+                print(f"✅ Подписка активирована для {user_tg_id}")
+
+        return web.Response(status=200)
+    except Exception as e:
+        print(f"Webhook error: {e}")
+        return web.Response(status=500)
+
+async def main() -> None:
+    bot = Bot(
+        token=settings.BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+
+    storage = MemoryStorage()
+    dp = Dispatcher(storage=storage)
+
+    dp.update.middleware(DbSessionMiddleware())
+    dp.update.middleware(BanCheckMiddleware())
+    dp.update.middleware(ActivityMiddleware())
+
+    register_all_handlers(dp)
+
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
+
+    # Запускаем фоновую задачу напоминаний
+    asyncio.create_task(reminders_task(bot))
+
+    allowed = dp.resolve_used_update_types()
+    logger.info(f"Allowed updates: {allowed}")
+
+    logger.info("Starting polling...")
+    await dp.start_polling(bot, allowed_updates=allowed)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
