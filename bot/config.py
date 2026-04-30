@@ -9,8 +9,16 @@ class Settings(BaseSettings):
     # Администраторы
     ADMIN_IDS: List[int] = []
 
-    # Подписка
+    # Цены подписки (в рублях)
+    SUBSCRIPTION_PRICE_1_MONTH: int = 39
+    SUBSCRIPTION_PRICE_3_MONTHS: int = 105
+    SUBSCRIPTION_PRICE_6_MONTHS: int = 200
+    SUBSCRIPTION_PRICE_12_MONTHS: int = 350
+    
+    # Оставляем для совместимости со старым кодом (из .env)
     SUBSCRIPTION_PRICE: int = 39
+
+    # SUBSCRIPTION_URL больше не нужна, оставляем для совместимости
     SUBSCRIPTION_URL: str = "https://your-payment-page.com"
 
     # ЮKassa

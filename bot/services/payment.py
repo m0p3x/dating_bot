@@ -10,11 +10,13 @@ Configuration.account_id = settings.YOOKASSA_SHOP_ID
 Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
 
 
-async def create_payment(amount: int, description: str, user_tg_id: int) -> Optional[str]:
+async def create_payment(amount: int, description: str, user_tg_id: int, months: int = 1) -> Optional[str]:
     """
     Создаёт платёж через ЮKassa и возвращает ссылку на оплату.
     """
     try:
+        print(f"🔍 Создание платежа: amount={amount}, description={description}, user_tg_id={user_tg_id}, months={months}")
+        
         payment_data = {
             "amount": {
                 "value": f"{amount}.00",
@@ -28,15 +30,22 @@ async def create_payment(amount: int, description: str, user_tg_id: int) -> Opti
             "description": description,
             "metadata": {
                 "user_tg_id": str(user_tg_id),
+                "months": str(months),
             }
         }
 
+        print(f"🔍 payment_data: {payment_data}")
+        
         payment = YooPayment.create(payment_data)
-
+        print(f"🔍 Платёж создан, URL: {payment.confirmation.confirmation_url}")
+        
         return payment.confirmation.confirmation_url
     except Exception as e:
-        print(f"Ошибка создания платежа: {e}")
+        print(f"❌ Ошибка создания платежа: {e}")
+        import traceback
+        traceback.print_exc()
         return None
+
 
 async def get_payment_status(payment_id: str) -> dict:
     """Получает статус платежа по ID"""

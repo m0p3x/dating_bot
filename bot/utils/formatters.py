@@ -59,21 +59,41 @@ def format_premium_upsell(feature_name: Optional[str] = None) -> str:
     return base
 
 
-def format_subscription_info() -> str:
-    """Экран описания подписки."""
-    return (
-        "⭐ <b>Подписка за 39 ₽/мес</b>\n\n"
+def format_subscription_info(user: Optional[User] = None) -> str:
+    """Экран описания подписки с информацией о текущей подписке"""
+    text = (
+        "⭐ <b>Премиум подписка</b>\n\n"
         "С подпиской вы получаете:\n\n"
         "💬 <b>Сообщение</b> — без ограничений\n"
         "   (бесплатно: 3 в день)\n\n"
-        "⭐ <b>Суперлайк (тот же лайк, но для особо понравившихся)</b> — без ограничений\n"
+        "⭐ <b>Суперлайк(тот же лайк, но для особенных)</b> — без ограничений\n"
         "   (бесплатно: 1 в день)\n\n"
         "↩ <b>Возврат к анкете</b> — вернитесь к случайно\n"
         "   пропущенной анкете\n\n"
         "🚀 <b>Буст анкеты</b> — ваша анкета показывается\n"
         "   выше остальных в течение 24 часов\n\n"
-        "⭐ <b>Значок Premium</b> на вашей анкете\n"
+        "⭐ <b>Значок Premium</b> на вашей анкете\n\n"
     )
+
+    # Если передан пользователь и у него есть активная подписка
+    if user and user.has_premium and user.premium_until:
+        from datetime import datetime
+        now = datetime.now(user.premium_until.tzinfo)
+        if user.premium_until > now:
+            days_left = (user.premium_until - now).days
+            text += f"📅 <b>Ваша подписка активна до:</b> {user.premium_until.strftime('%d.%m.%Y')}\n"
+            text += f"⏰ <b>Осталось дней:</b> {days_left}\n\n"
+        else:
+            text += "⚠️ <b>Ваша подписка истекла.</b> Продлите её ниже.\n\n"
+    else:
+        text += "💰 <b>Нет активной подписки.</b> Выберите тариф ниже:\n\n"
+
+    text += "• 1 месяц — 39₽\n"
+    text += "• 3 месяца — 105₽\n"
+    text += "• 6 месяцев — 200₽\n"
+    text += "• 12 месяцев — 350₽\n"
+
+    return text
 
 async def send_media(bot, chat_id: int, user, caption: str, reply_markup=None, parse_mode="HTML"):
     if not user.photos:

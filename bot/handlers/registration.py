@@ -345,7 +345,6 @@ async def _finish_registration(message: Message, state: FSMContext, session: Asy
 
     from bot.services.premium_service import PremiumService
     premium_svc = PremiumService(session)
-    await premium_svc.grant(user.tg_id, days=3650)
 
     # Сохраняем фото
     for i, item in enumerate(data.get("photos", [])):

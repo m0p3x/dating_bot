@@ -25,6 +25,14 @@ def skip_kb() -> ReplyKeyboardMarkup:
         resize_keyboard=True, one_time_keyboard=True,
     )
 
+def subscription_plans_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="1 месяц — 39₽", callback_data="sub_plan:1")
+    builder.button(text="3 месяца — 105₽", callback_data="sub_plan:3")
+    builder.button(text="6 месяцев — 200₽", callback_data="sub_plan:6")
+    builder.button(text="12 месяцев — 350₽", callback_data="sub_plan:12")
+    builder.adjust(1)  # по одной кнопке в строке
+    return builder.as_markup()
 
 def remove_kb() -> ReplyKeyboardRemove:
     return ReplyKeyboardRemove()

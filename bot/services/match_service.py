@@ -17,10 +17,6 @@ class MatchService:
         self.session = session
         self.bot = bot
 
-    # ──────────────────────────────────────────────
-    # Проверка лимитов
-    # ──────────────────────────────────────────────
-
     async def can_send_message_like(self, user: User) -> bool:
         if user.has_premium:
             return True
@@ -35,10 +31,6 @@ class MatchService:
         today = date.today()
         return user.super_like_date != today
 
-    # ──────────────────────────────────────────────
-    # Обновление счётчиков
-    # ──────────────────────────────────────────────
-
     async def _increment_message_like(self, user: User) -> None:
         today = date.today()
         if user.msg_like_date != today:
@@ -52,14 +44,6 @@ class MatchService:
         user.super_like_date = date.today()
         await self.session.commit()
 
-    # ──────────────────────────────────────────────
-    # Создание лайка
-    # ──────────────────────────────────────────────
-
-    # ──────────────────────────────────────────────
-    # Создание лайка
-    # ──────────────────────────────────────────────
-
     async def send_like(
             self,
             from_user: User,
@@ -67,17 +51,16 @@ class MatchService:
             like_type: str,
             message: Optional[str] = None,
     ) -> Optional[Like]:
-        # Нельзя лайкать самого себя
+        print(f"send_like: from={from_user.id} to={to_user.id}, type={like_type}")
+
         if from_user.id == to_user.id:
             return None
 
-        # Проверяем лимиты
         if like_type == "message" and not await self.can_send_message_like(from_user):
             return None
         if like_type == "super" and not await self.can_send_super_like(from_user):
             return None
 
-        # ✅ Загружаем встречный лайк с предзагрузкой from_user, его photos и tags
         existing_like = await self.session.execute(
             select(Like)
             .where(
@@ -92,37 +75,6 @@ class MatchService:
         )
         existing = existing_like.scalar_one_or_none()
 
-        # Если есть встречный лайк → МАТЧ!
-        if existing:
-            # ✅ Данные уже загружены
-            matched_user = existing.from_user
-
-            # Удаляем встречный лайк
-            await self.session.delete(existing)
-
-            # Удаляем возможный лайк от from_user к to_user
-            current_like = await self.session.execute(
-                select(Like).where(
-                    Like.from_id == from_user.id,
-                    Like.to_id == to_user.id,
-                )
-            )
-            current = current_like.scalar_one_or_none()
-            if current:
-                await self.session.delete(current)
-
-            await self.session.commit()
-
-            # Отправляем уведомление о матче ОБОИМ
-            await self._notify_match(from_user, matched_user)
-            return None
-
-        # Обычный лайк (без матча) — обновляем счётчики
-        if like_type == "message":
-            await self._increment_message_like(from_user)
-        if like_type == "super":
-            await self._mark_super_like_used(from_user)
-
         like = Like(
             from_id=from_user.id,
             to_id=to_user.id,
@@ -131,20 +83,27 @@ class MatchService:
             is_mutual=False,
         )
         self.session.add(like)
+        await self.session.flush()
+
+        if existing:
+            existing.is_mutual = True
+            like.is_mutual = True
+            await self.session.commit()
+            await self._notify_match(from_user, to_user)
+            return like
+
+        if like_type == "message":
+            await self._increment_message_like(from_user)
+        if like_type == "super":
+            await self._mark_super_like_used(from_user)
+
         await self.session.commit()
         await self.session.refresh(like)
-
-        # Уведомляем получателя
         await self._notify_receiver(like, from_user, to_user)
 
         return like
 
-    # ──────────────────────────────────────────────
-    # Ответный лайк → матч
-    # ──────────────────────────────────────────────
-
     async def reply_like(self, like_id: int, replying_user: User) -> bool:
-        # ✅ Загружаем лайк с предзагрузкой from_user, а у from_user — photos и tags
         result = await self.session.execute(
             select(Like)
             .where(Like.id == like_id, Like.to_id == replying_user.id)
@@ -158,13 +117,11 @@ class MatchService:
         if original_like is None:
             return False
 
-        # ✅ Данные уже загружены
         from_user = original_like.from_user
         from_user_id = from_user.id
         replying_user_id = replying_user.id
 
-        # Удаляем лайки
-        await self.session.delete(original_like)
+        original_like.is_mutual = True
 
         reverse_like = await self.session.execute(
             select(Like).where(
@@ -174,18 +131,12 @@ class MatchService:
         )
         reverse = reverse_like.scalar_one_or_none()
         if reverse:
-            await self.session.delete(reverse)
+            reverse.is_mutual = True
 
         await self.session.commit()
-
-        # ✅ Теперь у from_user есть photos и tags
         await self._notify_match(from_user, replying_user)
 
         return True
-
-    # ──────────────────────────────────────────────
-    # Входящие лайки (для экрана «Кто меня лайкнул»)
-    # ──────────────────────────────────────────────
 
     async def get_incoming_likes(self, user_id: int) -> List[Like]:
         result = await self.session.execute(
@@ -205,10 +156,6 @@ class MatchService:
             )
         )
         return list(result.scalars().all())
-
-    # ──────────────────────────────────────────────
-    # Уведомления
-    # ──────────────────────────────────────────────
 
     async def mark_like_viewed(self, like_id: int) -> None:
         result = await self.session.execute(select(Like).where(Like.id == like_id))
@@ -239,7 +186,6 @@ class MatchService:
             pass
 
     async def _notify_match(self, user1: User, user2: User) -> None:
-        """Отправляет ОБОИМ пользователям анкету друг друга с контактом"""
         for sender, receiver in [(user1, user2), (user2, user1)]:
             text = format_profile(receiver)
             text += "\n\n🎉 <b>У вас взаимная симпатия!</b>\n\n"
