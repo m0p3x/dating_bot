@@ -14,7 +14,6 @@ from bot.middlewares.ban_check import BanCheckMiddleware
 from bot.middlewares.activity import ActivityMiddleware
 from bot.handlers import register_all_handlers
 from bot.services.reminder_service import ReminderService
-from bot.services.premium_service import PremiumService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,6 +36,7 @@ async def on_shutdown(bot: Bot) -> None:
 
 
 async def reminders_task(bot: Bot, interval_minutes: int = 60):
+    """Фоновая задача для отправки напоминаний"""
     while True:
         await asyncio.sleep(interval_minutes * 60)
         try:
@@ -48,24 +48,29 @@ async def reminders_task(bot: Bot, interval_minutes: int = 60):
 
 
 async def yookassa_webhook(request):
+    """Обработчик уведомлений от ЮKassa"""
     try:
         data = await request.json()
         print(f"Webhook received: {data}")
+
+        # Проверяем, что это успешная оплата
         if data.get('event') == 'payment.succeeded':
             payment = data.get('object', {})
             metadata = payment.get('metadata', {})
             user_tg_id = metadata.get('user_tg_id')
-            months = int(metadata.get('months', 1))
+            months = int(metadata.get('months', 1))  # по умолчанию 1 месяц
+
             if user_tg_id:
-                async with AsyncSessionFactory() as session:
+                async with async_session_maker() as session:
                     premium_svc = PremiumService(session)
+                    # months * 30 дней
                     await premium_svc.grant(int(user_tg_id), days=months * 30)
                 print(f"✅ Подписка на {months} месяц(ев) активирована для {user_tg_id}")
+
         return web.Response(status=200)
     except Exception as e:
         print(f"Webhook error: {e}")
         return web.Response(status=500)
-
 
 async def main() -> None:
     bot = Bot(
@@ -85,6 +90,7 @@ async def main() -> None:
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
 
+    # Запускаем фоновую задачу напоминаний
     asyncio.create_task(reminders_task(bot))
 
     allowed = dp.resolve_used_update_types()

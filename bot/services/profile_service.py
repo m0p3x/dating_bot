@@ -106,11 +106,17 @@ class ProfileService:
     # ──────────────────────────────────────────────
 
     async def update_activity(self, tg_id: int) -> None:
-        """Обновляет время последней активности пользователя"""
+        """Обновляет время последней активности пользователя и сбрасывает флаги напоминаний"""
         from datetime import datetime, timezone
         user = await self.get_by_tg_id(tg_id)
         if user:
             user.last_activity = datetime.now(timezone.utc)
+            # ✅ Сбрасываем все флаги напоминаний (пользователь активен)
+            user.notified_at_24h = False
+            user.notified_at_72h = False
+            user.notified_at_168h = False
+            user.notified_at_336h = False
+            user.notified_at_720h = False
             await self.session.commit()
 
     async def get_or_create_tag(self, name: str) -> Tag:
