@@ -1,28 +1,22 @@
 from aiohttp import web
 import json
-import asyncpg
-
-DATABASE_URL = "postgresql://postgres:ZXsaQW25ZXsaQW252525@localhost:5432/dating_bot"
+from bot.database import AsyncSessionFactory
+from bot.services.premium_service import PremiumService
 
 async def yookassa_webhook(request):
     try:
         data = await request.json()
         print(f"Webhook received: {data}")
-        
         if data.get('event') == 'payment.succeeded':
-            metadata = data.get('object', {}).get('metadata', {})
+            payment = data.get('object', {})
+            metadata = payment.get('metadata', {})
             user_tg_id = metadata.get('user_tg_id')
-            
+            months = int(metadata.get('months', 1))
             if user_tg_id:
-                # Подключаемся к БД напрямую
-                conn = await asyncpg.connect(DATABASE_URL)
-                await conn.execute(
-                    "UPDATE users SET has_premium = true, premium_until = NOW() + INTERVAL '30 days' WHERE tg_id = $1",
-                    int(user_tg_id)
-                )
-                await conn.close()
-                print(f"✅ Premium activated for user {user_tg_id}")
-                
+                async with AsyncSessionFactory() as session:
+                    premium_svc = PremiumService(session)
+                    await premium_svc.grant(int(user_tg_id), days=months * 30)
+                    print(f"✅ Подписка активирована для {user_tg_id} на {months} мес")
         return web.Response(status=200)
     except Exception as e:
         print(f"Webhook error: {e}")
@@ -32,4 +26,4 @@ app = web.Application()
 app.router.add_post('/webhook/yookassa', yookassa_webhook)
 
 if __name__ == '__main__':
-    web.run_app(app, host='0.0.0.0', port=8080)
+    web.run_app(app, host='127.0.0.1', port=8080)

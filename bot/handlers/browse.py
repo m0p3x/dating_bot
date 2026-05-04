@@ -1,5 +1,6 @@
 from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
+from datetime import datetime, timedelta, timezone
 from aiogram.types import Message, CallbackQuery, InputMediaPhoto, InputMediaVideo
 from sqlalchemy.ext.asyncio import AsyncSession
 from bot.utils.formatters import format_profile, send_media
@@ -32,9 +33,28 @@ async def start_search(message: Message, state: FSMContext, session: AsyncSessio
         return
 
     data = await state.get_data()
+
+    # Проверяем, не заблокирован ли поиск (ждем 1 час)
+    search_blocked_until = data.get("search_blocked_until")
+    if search_blocked_until and datetime.now(timezone.utc) < search_blocked_until:
+        remaining = int((search_blocked_until - datetime.now(timezone.utc)).total_seconds() / 60)
+        await message.answer(
+            f"⏳ <b>Анкеты в твоем городе обновляются!</b>\n\n"
+            f"Пожалуйста, подожди <b>{remaining} минут</b>, пока появятся новые анкеты.\n\n"
+            f"Сейчас показываются анкеты из других городов. Продолжай смотреть или зайди позже! 🔄",
+            parse_mode="HTML",
+            reply_markup=main_menu_kb(),
+        )
+        # Если уже в режиме просмотра, продолжаем показывать анкеты из других городов
+        if data.get("filters_set") and data.get("search_expanded"):
+            await state.set_state(Browse.viewing)
+            await _show_next_profile(message, state, session, message.bot, message.from_user.id)
+        return
+
     if data.get("filters_set"):
+        await state.update_data(search_expanded=False, search_blocked_until=None, expansion_time=None)
         await state.set_state(Browse.viewing)
-        await message.answer("🔍 Ищу анкеты...", reply_markup=main_menu_kb())  # ← добавить
+        await message.answer("🔍 Ищу анкеты в твоем городе...", reply_markup=main_menu_kb())
         await _show_next_profile(message, state, session, message.bot, message.from_user.id)
         return
 
@@ -307,11 +327,11 @@ async def menu_liked_me(message: Message, session: AsyncSession, bot: Bot, state
 # ──────────────────────────────────────────────
 
 async def _show_next_profile(
-    message: Message,
-    state: FSMContext,
-    session: AsyncSession,
-    bot: Bot,
-    tg_id: int,
+        message: Message,
+        state: FSMContext,
+        session: AsyncSession,
+        bot: Bot,
+        tg_id: int,
 ):
     profile_svc = ProfileService(session)
     search_svc = SearchService(session)
@@ -326,6 +346,28 @@ async def _show_next_profile(
 
     data = await state.get_data()
 
+    # Проверяем блокировку поиска в родном городе
+    search_blocked_until = data.get("search_blocked_until")
+    search_expanded = data.get("search_expanded", False)
+
+    # Если блокировка активна - принудительно расширяем поиск
+    if search_blocked_until and datetime.now(timezone.utc) < search_blocked_until:
+        ignore_city = True
+    else:
+        # Если блокировки нет, но был расширенный поиск - проверяем время
+        expansion_time = data.get("expansion_time")
+        if search_expanded and expansion_time:
+            hours_passed = (datetime.now(timezone.utc) - expansion_time).total_seconds() / 3600
+            if hours_passed >= 1:
+                # Час прошел - снимаем блокировку
+                await state.update_data(search_expanded=False, search_blocked_until=None, expansion_time=None)
+                search_expanded = False
+                ignore_city = False
+            else:
+                ignore_city = True
+        else:
+            ignore_city = False
+
     candidate = await search_svc.get_next_profile(
         viewer=viewer,
         search_gender=data.get("search_gender"),
@@ -333,7 +375,32 @@ async def _show_next_profile(
         search_interests=data.get("search_interests") or [],
         apply_height=data.get("apply_height", False),
         search_height=data.get("search_height"),
+        ignore_city=ignore_city,  # ← НОВЫЙ ПАРАМЕТР
     )
+
+    # Если анкет нет и поиск НЕ расширен и город есть
+    if candidate is None and not ignore_city and viewer.city:
+        # Активируем расширенный поиск и блокировку на 1 час
+        blocked_until = datetime.now(timezone.utc) + timedelta(hours=1)
+        await state.update_data(
+            search_expanded=True,
+            search_blocked_until=blocked_until,
+            expansion_time=datetime.now(timezone.utc)
+        )
+
+        await message.answer(
+            "🏙️ <b>Анкеты из твоего города закончились!</b>\n\n"
+            "Теперь я покажу тебе анкеты из других городов.\n\n"
+            "⏰ <b>Через 1 час</b> анкеты в твоём городе обновятся.\n"
+            "Чтобы их увидеть, нажми <b>«🔍 Смотреть анкеты»</b> после того, как час пройдёт.\n\n"
+            "А пока продолжай смотреть анкеты из других городов! 🚀",
+            parse_mode="HTML",
+            reply_markup=main_menu_kb(),
+        )
+
+        # Повторяем поиск с ignore_city=True
+        await _show_next_profile(message, state, session, bot, tg_id)
+        return
 
     if candidate is None:
         search_gender = data.get("search_gender")
@@ -394,7 +461,6 @@ async def _show_next_profile(
 
     if sent_msg:
         await state.update_data(prev_msg_id=sent_msg.message_id)
-
 # ──────────────────────────────────────────────
 # Действия при просмотре анкеты
 # ──────────────────────────────────────────────

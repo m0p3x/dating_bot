@@ -44,6 +44,7 @@ class SearchService:
             search_interests: Optional[List[str]] = None,
             apply_height: bool = False,
             search_height: Optional[int] = None,
+            ignore_city: bool = False,
     ) -> Optional[User]:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.VIEWED_TTL_HOURS)
 
@@ -93,10 +94,9 @@ class SearchService:
             gender_condition = None
 
         # Дополнительные фильтры
-        if not viewer.city:
-            return None
-
-        city_condition = (func.lower(User.city) == viewer.city.lower())
+        city_condition = None
+        if not ignore_city and viewer.city:  # ← добавить параметр ignore_city в метод
+            city_condition = (func.lower(User.city) == viewer.city.lower())
 
         age_min = viewer.age - settings.AGE_FILTER_RANGE
         age_max = viewer.age + settings.AGE_FILTER_RANGE
