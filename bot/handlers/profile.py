@@ -3,12 +3,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InputMediaPhoto
 from sqlalchemy.ext.asyncio import AsyncSession
 from bot.services.referral_service import ReferralService
-from bot.states import EditProfile, Browse, SearchSetup
+from bot.states import EditProfile, Browse, SearchSetup, Verification
 from bot.keyboards import (
     profile_kb, confirm_delete_kb, skip_kb, remove_kb,
     gender_kb, goal_kb, interests_kb, subscription_kb, main_menu_kb,
-    profile_preview_kb, profile_only_kb,
+    profile_preview_kb, profile_only_kb, admin_verify_kb,  # ← добавить
 )
+from datetime import datetime, timezone
 from bot.services.profile_service import ProfileService
 from bot.services.premium_service import PremiumService
 from bot.services.match_service import MatchService
@@ -38,9 +39,8 @@ async def my_profile(message: Message, session: AsyncSession, state: FSMContext)
     await message.answer(
         f"<b>Профиль:</b>",
         parse_mode="HTML",
-        reply_markup=profile_kb(user.has_premium, user.is_active),
+        reply_markup=profile_kb(user.has_premium, user.is_active, user.is_verified),  # ← добавить is_verified
     )
-
 @router.callback_query(F.data == "profile:preview")
 async def profile_preview(callback: CallbackQuery, session: AsyncSession, bot: Bot):
     svc = ProfileService(session)
@@ -553,6 +553,130 @@ async def profile_referral(callback: CallbackQuery, session: AsyncSession):
     await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
 
+
+# ──────────────────────────────────────────────
+# Верификация аккаунта
+# ──────────────────────────────────────────────
+
+@router.callback_query(F.data == "profile:verify")
+async def verify_start(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Начать процесс верификации"""
+    svc = ProfileService(session)
+    user = await svc.get_by_tg_id(callback.from_user.id)
+
+    if user.is_verified:
+        await callback.answer("Ваш аккаунт уже верифицирован!", show_alert=True)
+        return
+
+    await state.set_state(Verification.waiting_video)
+
+    instructions = (
+        "✅ <b>Верификация аккаунта</b>\n\n"
+        "Чтобы подтвердить, что вы реальный человек, отправьте видео-кружок, где вы:\n\n"
+        "1️⃣ Смотрите в камеру\n"
+        "2️⃣ Чётко произносите слово <b>«ГАЗ»</b>\n\n"
+        "⚠️ <b>ВАЖНЫЕ ПРАВИЛА:</b>\n"
+        "• Просто запишите кружок :)\n"
+        "❌ <b>За попытку подделки видео - бан без предупреждения!</b>\n\n"
+        "После отправки кружочка, он будет отправлено на проверку администратору.\n"
+        "Обычно проверка занимает до 2 часов.\n\n"
+        "🏆 <b>Преимущества верификации:</b>\n"
+        "• Зеленая галочка в анкете\n"
+        "• Выше в поиске анкет (как буст анкеты в подписке, но чуть похуже)\n"
+        "• Больше доверия от других пользователей\n\n"
+        "🔙 Нажмите «Отмена», чтобы выйти"
+    )
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="❌ Отмена", callback_data="verify:cancel")
+    ]])
+
+    await callback.message.edit_text(instructions, parse_mode="HTML", reply_markup=cancel_kb)
+    await callback.answer()
+
+
+@router.callback_query(Verification.waiting_video, F.data == "verify:cancel")
+async def verify_cancel(callback: CallbackQuery, state: FSMContext):
+    """Отмена верификации"""
+    await state.set_state(None)
+    await callback.message.edit_text("❌ Верификация отменена.")
+    await callback.answer()
+
+
+@router.message(Verification.waiting_video, F.video_note)
+async def verify_video_received(message: Message, state: FSMContext, session: AsyncSession, bot: Bot):
+    """Получен видео-кружок для верификации"""
+    svc = ProfileService(session)
+    user = await svc.get_by_tg_id(message.from_user.id)
+
+    video_note = message.video_note
+    file_id = video_note.file_id
+
+    # Сохраняем в БД (можно добавить отдельную таблицу, пока сохраним в state)
+    await state.update_data(verification_video=file_id)
+
+    # Отправляем админам
+    from bot.config import settings
+
+    for admin_id in settings.ADMIN_IDS:
+        try:
+            # Отправляем видео
+            await bot.send_video_note(
+                chat_id=admin_id,
+                video_note=file_id,
+            )
+            # Отправляем информацию
+            await bot.send_message(
+                chat_id=admin_id,
+                text=(
+                    f"🆕 <b>Новая заявка на верификацию!</b>\n\n"
+                    f"👤 Пользователь: {user.name}\n"
+                    f"🆔 ID: {user.id}\n"
+                    f"📱 TG ID: {user.tg_id}\n"
+                    f"@{user.username or 'нет username'}\n\n"
+                    f"📅 Дата: {datetime.now(timezone.utc).strftime('%d.%m.%Y %H:%M')}\n\n"
+                    f"Используйте кнопки ниже для обработки:"
+                ),
+                parse_mode="HTML",
+                reply_markup=admin_verify_kb(user.id),
+            )
+        except Exception as e:
+            print(f"Ошибка отправки админу: {e}")
+
+    await state.set_state(None)
+    await message.answer(
+        "✅ <b>Видео отправлено на проверку!</b>\n\n"
+        "Администратор проверит вашу заявку в ближайшее время.\n"
+        "Обычно это занимает до 24 часов.\n\n"
+        "После верификации вы получите уведомление и зеленую галочку в профиле!",
+        parse_mode="HTML",
+        reply_markup=main_menu_kb(),
+    )
+
+
+@router.message(Verification.waiting_video)
+async def verify_invalid_input(message: Message, state: FSMContext):
+    """Пользователь отправил не видео-кружок"""
+    await message.answer(
+        "❌ <b>Неверный формат!</b>\n\n"
+        "Для верификации нужно отправить именно <b>видео-кружок</b> (Video Note).\n\n"
+        "Как отправить кружок:\n"
+        "1. Нажмите внизу справа на гс (если выбрано гс)\n"
+        "2. Выберите «Кружок» (просто нажмите на иконку гс)\n"
+        "3. Запишите видео с лицом и словом «ГАЗ»\n\n"
+        "Или нажмите «Отмена», чтобы выйти.",
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("profile:verify_info"))
+async def verify_info(callback: CallbackQuery):
+    """Информация о верификации (для уже верифицированных)"""
+    await callback.answer(
+        "✅ Ваш аккаунт верифицирован! Зеленая галочка отображается в анкете.",
+        show_alert=True,
+    )
 
 @router.callback_query(F.data == "profile:top5")
 async def profile_top5(callback: CallbackQuery, session: AsyncSession, bot: Bot):

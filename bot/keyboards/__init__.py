@@ -200,13 +200,22 @@ def back_only_kb(has_premium: bool) -> InlineKeyboardMarkup:
     )
     return builder.as_markup()
 
-def profile_kb(has_premium: bool, is_active: bool = True) -> InlineKeyboardMarkup:
+
+def profile_kb(has_premium: bool, is_active: bool = True, is_verified: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="👁 Моя анкета", callback_data="profile:preview")
     builder.button(text="📊 Моя статистика", callback_data="profile:stats")
     builder.button(text="🏆 Топ 5 анкет", callback_data="profile:top5")
-    builder.button(text="🔗 Реферальная ссылка", callback_data="profile:referral")  # добавь
+    builder.button(text="🔗 Реферальная ссылка", callback_data="profile:referral")
     builder.adjust(1)
+
+    # Кнопка верификации (зеленая, если уже верифицирован)
+    if is_verified:
+        builder.button(text="✅ Аккаунт верифицирован", callback_data="profile:verify_info")
+    else:
+        builder.button(text="✅ Верифицировать аккаунт", callback_data="profile:verify")
+    builder.adjust(1)
+
     if has_premium:
         builder.button(text="🚀 Буст анкеты", callback_data="profile:boost")
     else:
@@ -231,6 +240,12 @@ def subscription_kb(url: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="💳 Оформить за 39 ₽/мес", url=url),
     ]])
 
+def admin_verify_kb(user_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Подтвердить верификацию", callback_data=f"admin_verify:approve:{user_id}")
+    builder.button(text="❌ Отклонить", callback_data=f"admin_verify:reject:{user_id}")
+    builder.adjust(1)
+    return builder.as_markup()
 
 def admin_menu_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -264,5 +279,12 @@ def admin_user_kb(user_id: int, is_banned: bool, has_premium: bool) -> InlineKey
     else:
         builder.button(text="⭐ Выдать подписку", callback_data=f"admin_user:give_premium:{user_id}")
     builder.button(text="🗑 Удалить анкету", callback_data=f"admin_user:delete:{user_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def terms_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Принимаю условия", callback_data="terms:accept")
+    builder.button(text="❌ Не принимаю", callback_data="terms:decline")
     builder.adjust(1)
     return builder.as_markup()

@@ -288,3 +288,78 @@ async def admin_broadcast_cancel(callback: CallbackQuery, state: FSMContext):
 async def admin_cancel(message: Message, state: FSMContext):
     await state.set_state(AdminStates.main)
     await message.answer("Действие отменено.", reply_markup=admin_menu_kb())
+
+
+# ──────────────────────────────────────────────
+# Верификация аккаунтов
+# ──────────────────────────────────────────────
+
+@router.callback_query(IsAdmin(), F.data.startswith("admin_verify:"))
+async def admin_verify_action(callback: CallbackQuery, session: AsyncSession, bot: Bot):
+    parts = callback.data.split(":")
+    action = parts[1]
+    user_db_id = int(parts[2])
+
+    from sqlalchemy import select, update
+    from bot.models import User
+
+    if action == "approve":
+        # Подтверждаем верификацию
+        await session.execute(
+            update(User)
+            .where(User.id == user_db_id)
+            .values(is_verified=True)
+        )
+        await session.commit()
+
+        # Находим tg_id пользователя
+        result = await session.execute(
+            select(User.tg_id, User.name).where(User.id == user_db_id)
+        )
+        user_data = result.first()
+
+        if user_data:
+            tg_id, name = user_data
+            try:
+                await bot.send_message(
+                    tg_id,
+                    "✅ <b>Поздравляем! Ваш аккаунт успешно верифицирован!</b>\n\n"
+                    "Теперь:\n"
+                    "• В вашей анкете отображается зеленая галочка ✅\n"
+                    "• Вы будете выше в поиске (как с бустом)\n"
+                    "• Другие пользователи видят, что вы настоящий человек\n\n"
+                    "Спасибо за прохождение верификации! 🎉",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+        await callback.answer(f"✅ Пользователь {name} верифицирован!", show_alert=True)
+
+    elif action == "reject":
+        # Отклоняем верификацию
+        result = await session.execute(
+            select(User.tg_id, User.name).where(User.id == user_db_id)
+        )
+        user_data = result.first()
+
+        if user_data:
+            tg_id, name = user_data
+            try:
+                await bot.send_message(
+                    tg_id,
+                    "❌ <b>Ваша заявка на верификацию отклонена</b>\n\n"
+                    "Возможные причины:\n"
+                    "• Нечёткое видео или плохое освещение\n"
+                    "• Вы не произнесли слово «ГАЗ»\n"
+                    "• Видео выглядит как поддельное или отредактированное\n\n"
+                    "Вы можете попробовать снова через 24 часа.\n"
+                    "Пожалуйста, внимательно прочитайте инструкцию!",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+        await callback.answer(f"❌ Верификация пользователя {name} отклонена", show_alert=True)
+
+    await callback.message.edit_reply_markup()

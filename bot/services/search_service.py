@@ -62,7 +62,6 @@ class SearchService:
             .where(
                 Like.from_id == viewer.id,
                 Like.is_mutual == False,
-                Like.is_viewed == False,
             )
             .scalar_subquery()
         )
@@ -139,7 +138,7 @@ class SearchService:
             conditions.extend(extra_filters)
             return await self._query_one(conditions)
 
-        # Попытка 1: все фильтры
+        # Шаг 1: все фильтры (рост + цель + интересы + возраст + город)
         candidate = await _try_search(
             opt(city_condition) + [age_condition]
             + opt(height_condition) + opt(goal_condition) + opt(interests_condition)
@@ -147,7 +146,7 @@ class SearchService:
         if candidate:
             return candidate
 
-        # Попытка 2: без роста
+        # Шаг 2: убираем рост (цель + интересы + возраст + город)
         candidate = await _try_search(
             opt(city_condition) + [age_condition]
             + opt(goal_condition) + opt(interests_condition)
@@ -155,29 +154,29 @@ class SearchService:
         if candidate:
             return candidate
 
-        # Попытка 3: без цели
+        # Шаг 3: убираем интересы (только цель + возраст + город)
         candidate = await _try_search(
             opt(city_condition) + [age_condition]
-            + opt(interests_condition)
+            + opt(goal_condition)
         )
         if candidate:
             return candidate
 
-        # Попытка 4: без интересов
+        # Шаг 4: убираем цель (только возраст + город)
         candidate = await _try_search(
             opt(city_condition) + [age_condition]
         )
         if candidate:
             return candidate
 
-        # Попытка 5: только город + пол
+        # Шаг 5: убираем возраст (только город)
         candidate = await _try_search(
             opt(city_condition)
         )
         if candidate:
             return candidate
 
-        # ❌ Анкет в городе с выбранным полом нет
+        # Шаг 6: анкет в городе с выбранным полом нет
         return None
 
     async def _query_one(self, conditions: list) -> Optional[User]:

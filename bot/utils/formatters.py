@@ -5,24 +5,20 @@ from bot.keyboards import GOALS
 
 
 def format_profile(user: User, is_super: bool = False) -> str:
-    """
-    Возвращает текст анкеты для отображения пользователю.
-    is_super=True — добавляет пометку суперлайка (используется при просмотре входящих).
-    """
     lines = []
 
     if is_super:
         lines.append("⭐ <b>Суперлайк!</b>")
         lines.append("")
 
-    # Имя и возраст — всегда есть
-    header = f"<b>{user.name}</b>, {user.age} лет"
+    # Имя и возраст с зеленой галочкой если верифицирован
+    verified_badge = " ✅" if user.is_verified else ""
+    header = f"<b>{user.name}</b>{verified_badge}, {user.age} лет"
 
     # Пол
     gender_str = "👨 Парень" if user.gender == "M" else "👩 Девушка"
     header += f"  •  {gender_str}"
     lines.append(header)
-
     # Рост — если есть
     if user.height:
         lines.append(f"📏 Рост: {user.height} см")

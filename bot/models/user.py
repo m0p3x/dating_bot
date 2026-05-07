@@ -26,6 +26,7 @@ class User(Base):
     # Статус анкеты
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Подписка
     has_premium: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

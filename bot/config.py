@@ -14,12 +14,16 @@ class Settings(BaseSettings):
     SUBSCRIPTION_PRICE_3_MONTHS: int = 105
     SUBSCRIPTION_PRICE_6_MONTHS: int = 200
     SUBSCRIPTION_PRICE_12_MONTHS: int = 350
-    
-    # Оставляем для совместимости со старым кодом (из .env)
-    SUBSCRIPTION_PRICE: int = 39
+
+    # Для совместимости со старым кодом
+    @property
+    def SUBSCRIPTION_PRICE(self):
+        return self.SUBSCRIPTION_PRICE_1_MONTH
 
     # SUBSCRIPTION_URL больше не нужна, оставляем для совместимости
     SUBSCRIPTION_URL: str = "https://your-payment-page.com"
+
+    TERMS_URL: str = ""
 
     # ЮKassa
     YOOKASSA_SHOP_ID: str = "1342309"

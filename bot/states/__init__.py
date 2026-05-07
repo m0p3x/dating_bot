@@ -11,6 +11,7 @@ class Registration(StatesGroup):
     interests = State()
     bio = State()
     photo = State()
+    terms = State()
 
 
 class EditProfile(StatesGroup):
@@ -40,6 +41,8 @@ class Browse(StatesGroup):
     reporting = State()
     report_comment = State()
 
+class Verification(StatesGroup):
+    waiting_video = State()  # Ожидание видео-кружка для верификации
 
 class AdminStates(StatesGroup):
     main = State()
