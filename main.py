@@ -72,6 +72,15 @@ async def yookassa_webhook(request):
         print(f"Webhook error: {e}")
         return web.Response(status=500)
 
+async def expired_events_cleaner():
+    from bot.database import AsyncSessionFactory
+    from bot.services.event_service import EventService
+    while True:
+        await asyncio.sleep(3600)  # каждый час
+        async with AsyncSessionFactory() as session:
+            svc = EventService(session)
+            await svc.deactivate_expired_events()
+
 async def main() -> None:
     bot = Bot(
         token=settings.BOT_TOKEN,

@@ -50,3 +50,10 @@ class AdminStates(StatesGroup):
     searching_user = State()
     broadcast_confirm = State()
     broadcast_text = State()
+
+class FindCompany(StatesGroup):
+    choosing_category = State()   # выбор категории при создании
+    input_date = State()          # ввод даты
+    input_description = State()   # ввод описания
+    confirm = State()             # подтверждение
+    browsing_categories = State() # выбор категории для поиска

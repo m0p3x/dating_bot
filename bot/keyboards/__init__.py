@@ -79,7 +79,8 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
     builder.button(text="🔍 Смотреть анкеты")
     builder.button(text="❤️ Кто меня лайкнул")
     builder.button(text="👤 Мой профиль")
-    builder.adjust(2, 1, 2)
+    builder.button(text="👥 Найти компанию")  # ← добавить
+    builder.adjust(2, 1, 2, 1)  # ← изменить adjust
     return builder.as_markup(resize_keyboard=True)
 
 def profile_only_kb() -> ReplyKeyboardMarkup:
@@ -87,6 +88,7 @@ def profile_only_kb() -> ReplyKeyboardMarkup:
     builder.button(text="🔍 Смотреть анкеты")
     builder.button(text="❤️ Кто меня лайкнул")
     builder.button(text="👤 Мой профиль")
+    builder.button(text="👥 Найти компанию")
     builder.adjust(1)
     return builder.as_markup(resize_keyboard=True)
 
@@ -286,5 +288,60 @@ def terms_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Принимаю условия", callback_data="terms:accept")
     builder.button(text="❌ Не принимаю", callback_data="terms:decline")
+    builder.adjust(1)
+    return builder.as_markup()
+
+# ========== Клавиатуры для режима "Найти компанию" ==========
+
+def company_mode_kb() -> ReplyKeyboardMarkup:
+    """Главное меню режима компании"""
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="➕ Создать встречу")
+    builder.button(text="🔍 Найти встречу")
+    builder.button(text="📋 Мои встречи")
+    builder.button(text="🔙 Выйти из режима")
+    builder.adjust(2)
+    return builder.as_markup(resize_keyboard=True)
+
+
+def company_categories_kb(categories: list, for_search: bool = False) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    # Если это для поиска - добавляем кнопку "Все события"
+    if for_search:
+        builder.button(text="🌟 Все события", callback_data="company_cat:all")
+
+    for cat in categories:
+        # Пропускаем категорию "Все события" (если она есть в списке)
+        if cat.name == "Все события":
+            continue
+        builder.button(
+            text=f"{cat.emoji or '📌'} {cat.name}",
+            callback_data=f"company_cat:{cat.id}"
+        )
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def company_confirm_kb() -> InlineKeyboardMarkup:
+    """Подтверждение создания встречи"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, создать", callback_data="company_confirm:yes")
+    builder.button(text="❌ Нет, отмена", callback_data="company_confirm:no")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def company_event_kb(event_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💬 Связаться с организатором", callback_data=f"company_contact:{event_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def company_my_event_kb(event_id: int) -> InlineKeyboardMarkup:
+    """Кнопки для управления своим событием"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Отменить встречу", callback_data=f"company_cancel:{event_id}")
     builder.adjust(1)
     return builder.as_markup()

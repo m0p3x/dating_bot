@@ -1,5 +1,5 @@
 from typing import Optional
-
+import html
 from bot.models import User
 from bot.keyboards import GOALS
 
@@ -39,7 +39,7 @@ def format_profile(user: User, is_super: bool = False) -> str:
     # Bio — если есть
     if user.bio:
         lines.append("")
-        lines.append(user.bio)
+        lines.append(html.escape(user.bio))
 
     # Значок подписки
     if user.has_premium:

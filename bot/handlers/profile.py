@@ -446,13 +446,17 @@ async def edit_photo_done(message: Message, state: FSMContext, session: AsyncSes
     photos = data.get("photos", [])
     svc = ProfileService(session)
     user = await svc.get_by_tg_id(message.from_user.id)
-    if photos:
-        await svc.delete_photos(user.id)
-        for i, item in enumerate(photos):
-            if isinstance(item, dict):
-                await svc.add_photo(user.id, item["file_id"], order=i, media_type=item["type"])
-            else:
-                await svc.add_photo(user.id, item, order=i, media_type="photo")
+
+    # ✅ Удаляем все старые фото пользователя
+    await svc.delete_photos(user.id)
+
+    # Добавляем новые
+    for i, item in enumerate(photos):
+        if isinstance(item, dict):
+            await svc.add_photo(user.id, item["file_id"], order=i, media_type=item["type"])
+        else:
+            await svc.add_photo(user.id, item, order=i, media_type="photo")
+
     await state.set_state(None)
     await message.answer("✅ Медиа обновлены!", reply_markup=main_menu_kb())
 
