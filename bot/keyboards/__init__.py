@@ -2,6 +2,8 @@ from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
 )
+from aiogram.types import WebAppInfo
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from typing import List
 
@@ -345,3 +347,12 @@ def company_my_event_kb(event_id: int) -> InlineKeyboardMarkup:
     builder.button(text="❌ Отменить встречу", callback_data=f"company_cancel:{event_id}")
     builder.adjust(1)
     return builder.as_markup()
+
+def main_menu_kb_with_webapp(user_tg_id: int) -> ReplyKeyboardMarkup:
+    builder = ReplyKeyboardBuilder()
+    url = f"https://gazdatingbot.ru/?tg_id={user_tg_id}"
+    builder.button(text="🚀 Открыть Mini App", web_app=WebAppInfo(url=url))
+    builder.button(text="👤 Мой профиль")
+    builder.button(text="👥 Найти компанию")
+    builder.adjust(1)
+    return builder.as_markup(resize_keyboard=True)

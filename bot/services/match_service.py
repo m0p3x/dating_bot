@@ -2,9 +2,10 @@ from datetime import date
 from typing import Optional, List
 from aiogram import Bot
 from sqlalchemy import select
+from bot.models import Match
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from bot.config import settings
 from bot.models import Like, User, UserTag
 from bot.keyboards import like_received_kb
@@ -67,17 +68,19 @@ class MatchService:
             like_type: str,
             message: Optional[str] = None,
     ) -> Optional[Like]:
-        # Нельзя лайкать самого себя
+        print(f"LIKE DEBUG: from={from_user.id} to={to_user.id} type={like_type}")
+
         if from_user.id == to_user.id:
+            print("LIKE DEBUG: same user")
             return None
 
-        # Проверяем лимиты
         if like_type == "message" and not await self.can_send_message_like(from_user):
-            return None
+            print("LIKE DEBUG: message limit")
+            return "limit"
         if like_type == "super" and not await self.can_send_super_like(from_user):
-            return None
+            print("LIKE DEBUG: super limit")
+            return "limit"
 
-        # ✅ Загружаем встречный лайк с предзагрузкой from_user, его photos и tags
         existing_like = await self.session.execute(
             select(Like)
             .where(
@@ -91,22 +94,16 @@ class MatchService:
             .limit(1)
         )
         existing = existing_like.scalar_one_or_none()
+        print(f"LIKE DEBUG: existing={existing}")
 
-        # Если есть встречный лайк → МАТЧ!
         if existing:
-            # Защита от дублирования: если уже матч, не отправляем повторно
             if existing.is_mutual:
+                print("LIKE DEBUG: already mutual")
                 return None
 
-            # Помечаем как матч
-            existing.is_mutual = True
-
             matched_user = existing.from_user
-
-            # Удаляем встречный лайк
             await self.session.delete(existing)
 
-            # Удаляем возможный лайк от from_user к to_user
             current_like = await self.session.execute(
                 select(Like).where(
                     Like.from_id == from_user.id,
@@ -115,16 +112,16 @@ class MatchService:
             )
             current = current_like.scalar_one_or_none()
             if current:
-                current.is_mutual = True
                 await self.session.delete(current)
 
+            new_match = Match(user1_id=from_user.id, user2_id=to_user.id)
+            self.session.add(new_match)
             await self.session.commit()
-
-            # Отправляем уведомление о матче ОБОИМ (только один раз)
+            print("LIKE DEBUG: match created")
             await self._notify_match(from_user, matched_user)
             return None
 
-        # Обычный лайк (без матча) — обновляем счётчики
+        print("LIKE DEBUG: creating like")
         if like_type == "message":
             await self._increment_message_like(from_user)
         if like_type == "super":
@@ -139,11 +136,9 @@ class MatchService:
         )
         self.session.add(like)
         await self.session.commit()
+        print("LIKE DEBUG: committed")
         await self.session.refresh(like)
-
-        # Уведомляем получателя
         await self._notify_receiver(like, from_user, to_user)
-
         return like
 
     # ──────────────────────────────────────────────
@@ -227,22 +222,26 @@ class MatchService:
     async def _notify_receiver(self, like: Like, from_user: User, to_user: User) -> None:
         try:
             if like.type == "message":
-                text = (
-                    "💬 <b>Вам написали сообщение!</b>\n\n"
-                    "Кто-то хочет познакомиться с вами и отправил сообщение. Посмотреть?"
-                )
+                text = "💬 <b>Вам написали сообщение!</b>\n\nКто-то хочет познакомиться с вами и отправил сообщение."
             elif like.type == "super":
-                text = "⭐ <b>Кто-то поставил вам суперлайк!</b>\nПосмотреть анкету?"
+                text = "⭐ <b>Кто-то поставил вам суперлайк!</b>"
             else:
-                text = "❤️ <b>Кто-то оценил вашу анкету!</b>\nПосмотреть? Или посмотрите позже в разделе «Кто меня лайкнул»"
+                text = "❤️ <b>Кто-то оценил вашу анкету!</b>"
 
+            web_app_url = "https://gazdatingbot.ru/#likes"
+            reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="👀 Посмотреть в приложении",
+                    web_app=WebAppInfo(url=web_app_url)
+                )]
+            ])
             await self.bot.send_message(
                 chat_id=to_user.tg_id,
                 text=text,
-                reply_markup=like_received_kb(like.id),
                 parse_mode="HTML",
+                reply_markup=reply_markup
             )
-        except Exception:
+        except Exception as e:
             pass
 
     async def _notify_match(self, user1: User, user2: User) -> None:

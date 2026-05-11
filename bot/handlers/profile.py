@@ -6,10 +6,11 @@ from bot.services.referral_service import ReferralService
 from bot.states import EditProfile, Browse, SearchSetup, Verification
 from bot.keyboards import (
     profile_kb, confirm_delete_kb, skip_kb, remove_kb,
-    gender_kb, goal_kb, interests_kb, subscription_kb, main_menu_kb,
+    gender_kb, goal_kb, interests_kb, subscription_kb,
     profile_preview_kb, profile_only_kb, admin_verify_kb,  # ← добавить
 )
 from datetime import datetime, timezone
+from bot.keyboards import main_menu_kb_with_webapp
 from bot.services.profile_service import ProfileService
 from bot.services.premium_service import PremiumService
 from bot.services.match_service import MatchService
@@ -31,16 +32,14 @@ async def my_profile(message: Message, session: AsyncSession, state: FSMContext)
         await message.answer("Анкета не найдена. Используй /start.")
         return
 
-    premium_svc = PremiumService(session)
-    await premium_svc.check_and_expire(user)
-
     await state.set_state(None)
-    await message.answer("💎", reply_markup=profile_only_kb())
+    await message.answer("💎", reply_markup=main_menu_kb_with_webapp(user.tg_id))
     await message.answer(
         f"<b>Профиль:</b>",
         parse_mode="HTML",
-        reply_markup=profile_kb(user.has_premium, user.is_active, user.is_verified),  # ← добавить is_verified
+        reply_markup=profile_kb(user.has_premium, user.is_active, user.is_verified),
     )
+
 @router.callback_query(F.data == "profile:preview")
 async def profile_preview(callback: CallbackQuery, session: AsyncSession, bot: Bot):
     svc = ProfileService(session)
@@ -262,7 +261,7 @@ async def edit_field_choose(callback: CallbackQuery, state: FSMContext):
         "goal": ("Выбери цель:", EditProfile.goal, goal_kb(skip=True)),
         "interests": ("Выбери увлечения:", EditProfile.interests, interests_kb([], skip=True)),
         "bio": ("Напиши о себе (или «Пропустить»):", EditProfile.bio, skip_kb()),
-        "photo": ("Отправь новые фото (до 3) или напиши «Готово»/«Пропустить»:", EditProfile.photo, skip_kb()),
+        "photo": ("Отправь новое фото или напиши «Готово»/«Пропустить»:", EditProfile.photo, skip_kb()),
     }
 
     text, new_state, kb = prompts[field]
@@ -282,7 +281,7 @@ async def edit_name(message: Message, state: FSMContext, session: AsyncSession):
     svc = ProfileService(session)
     await svc.update_field(message.from_user.id, name=name)
     await state.set_state(None)
-    await message.answer("✅ Имя обновлено!", reply_markup=main_menu_kb())
+    await message.answer("✅ Имя обновлено!", reply_markup=main_menu_kb_with_webapp())
 
 
 @router.message(EditProfile.age)
@@ -293,7 +292,7 @@ async def edit_age(message: Message, state: FSMContext, session: AsyncSession):
     svc = ProfileService(session)
     await svc.update_field(message.from_user.id, age=int(message.text))
     await state.set_state(None)
-    await message.answer("✅ Возраст обновлён!", reply_markup=main_menu_kb())
+    await message.answer("✅ Возраст обновлён!", reply_markup=main_menu_kb_with_webapp())
 
 
 @router.message(EditProfile.height, F.text == "Пропустить")
@@ -301,7 +300,7 @@ async def edit_height_skip(message: Message, state: FSMContext, session: AsyncSe
     svc = ProfileService(session)
     await svc.update_field(message.from_user.id, height=None)
     await state.set_state(None)
-    await message.answer("✅ Рост убран.", reply_markup=main_menu_kb())
+    await message.answer("✅ Рост убран.", reply_markup=main_menu_kb_with_webapp())
 
 
 @router.message(EditProfile.height)
@@ -312,7 +311,7 @@ async def edit_height(message: Message, state: FSMContext, session: AsyncSession
     svc = ProfileService(session)
     await svc.update_field(message.from_user.id, height=int(message.text))
     await state.set_state(None)
-    await message.answer("✅ Рост обновлён!", reply_markup=main_menu_kb())
+    await message.answer("✅ Рост обновлён!", reply_markup=main_menu_kb_with_webapp())
 
 
 from bot.utils.cities import normalize_city
@@ -335,7 +334,7 @@ async def edit_city(message: Message, state: FSMContext, session: AsyncSession):
     svc = ProfileService(session)
     await svc.update_field(message.from_user.id, city=normalized)
     await state.set_state(None)
-    await message.answer("✅ Город обновлён!", reply_markup=main_menu_kb())
+    await message.answer("✅ Город обновлён!", reply_markup=main_menu_kb_with_webapp())
 
 
 @router.callback_query(EditProfile.goal, F.data.startswith("goal:"))
@@ -398,7 +397,7 @@ async def edit_bio_skip(message: Message, state: FSMContext, session: AsyncSessi
     svc = ProfileService(session)
     await svc.update_field(message.from_user.id, bio=None)
     await state.set_state(None)
-    await message.answer("✅ Bio убрано.", reply_markup=main_menu_kb())
+    await message.answer("✅ Bio убрано.", reply_markup=main_menu_kb_with_webapp())
 
 
 @router.message(EditProfile.bio)
@@ -410,34 +409,34 @@ async def edit_bio(message: Message, state: FSMContext, session: AsyncSession):
     svc = ProfileService(session)
     await svc.update_field(message.from_user.id, bio=bio)
     await state.set_state(None)
-    await message.answer("✅ Bio обновлено!", reply_markup=main_menu_kb())
+    await message.answer("✅ Bio обновлено!", reply_markup=main_menu_kb_with_webapp())
 
 
 @router.message(EditProfile.photo, F.photo)
 async def edit_photo_receive(message: Message, state: FSMContext):
     data = await state.get_data()
     photos: list = data.get("photos", [])
-    if len(photos) >= 3:
-        await message.answer("Максимум 3 файла. Напиши «Готово».")
+    if len(photos) >= 1:  # ← было 3
+        await message.answer("Максимум 1 фото.")
         return
     photos.append({"file_id": message.photo[-1].file_id, "type": "photo"})
     await state.update_data(photos=photos)
-    await message.answer(f"Фото добавлено ({len(photos)}/3). Ещё или напиши «Готово».")
+    await message.answer(f"Фото добавлено (1/1). Напиши «Готово».")
 
 
-@router.message(EditProfile.photo, F.video)
-async def edit_video_receive(message: Message, state: FSMContext):
-    data = await state.get_data()
-    photos: list = data.get("photos", [])
-    if len(photos) >= 3:
-        await message.answer("Максимум 3 файла. Напиши «Готово».")
-        return
-    if message.video.duration > 15:
-        await message.answer("⚠️ Видео слишком длинное. Максимум — 15 секунд.")
-        return
-    photos.append({"file_id": message.video.file_id, "type": "video"})
-    await state.update_data(photos=photos)
-    await message.answer(f"Видео добавлено ({len(photos)}/3). Ещё или напиши «Готово».")
+# @router.message(EditProfile.photo, F.video)
+# async def edit_video_receive(message: Message, state: FSMContext):
+#     data = await state.get_data()
+#     photos: list = data.get("photos", [])
+#     if len(photos) >= 3:
+#         await message.answer("Максимум 3 файла. Напиши «Готово».")
+#         return
+#     if message.video.duration > 15:
+#         await message.answer("⚠️ Видео слишком длинное. Максимум — 15 секунд.")
+#         return
+#     photos.append({"file_id": message.video.file_id, "type": "video"})
+#     await state.update_data(photos=photos)
+#     await message.answer(f"Видео добавлено ({len(photos)}/3). Ещё или напиши «Готово».")
 
 
 @router.message(EditProfile.photo, F.text.in_({"Готово", "готово", "Пропустить"}))
@@ -458,7 +457,7 @@ async def edit_photo_done(message: Message, state: FSMContext, session: AsyncSes
             await svc.add_photo(user.id, item, order=i, media_type="photo")
 
     await state.set_state(None)
-    await message.answer("✅ Медиа обновлены!", reply_markup=main_menu_kb())
+    await message.answer("✅ Медиа обновлены!", reply_markup=main_menu_kb_with_webapp())
 
 # ──────────────────────────────────────────────
 # Создать анкету заново
@@ -655,7 +654,7 @@ async def verify_video_received(message: Message, state: FSMContext, session: As
         "Обычно это занимает до 24 часов.\n\n"
         "После верификации вы получите уведомление и зеленую галочку в профиле!",
         parse_mode="HTML",
-        reply_markup=main_menu_kb(),
+        reply_markup=main_menu_kb_with_webapp(),
     )
 
 

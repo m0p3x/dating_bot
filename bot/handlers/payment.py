@@ -1,10 +1,11 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
+from bot.services.profile_service import ProfileService
 
 from bot.config import settings
 from bot.services.payment import create_payment
-from bot.keyboards import main_menu_kb, subscription_plans_kb
+from bot.keyboards import main_menu_kb_with_webapp, subscription_plans_kb
 from bot.utils.formatters import format_subscription_info
 from bot.services.profile_service import ProfileService
 
@@ -32,10 +33,8 @@ async def show_subscription_plans_callback(callback: CallbackQuery, session: Asy
 
 @router.callback_query(F.data.startswith("sub_plan:"))
 async def handle_subscription_plan(callback: CallbackQuery, session: AsyncSession):
-    """Обработка выбора плана подписки"""
     months = int(callback.data.split(":")[1])
 
-    # Определяем цену в зависимости от срока
     if months == 1:
         amount = settings.SUBSCRIPTION_PRICE_1_MONTH
     elif months == 3:
@@ -47,10 +46,16 @@ async def handle_subscription_plan(callback: CallbackQuery, session: AsyncSessio
 
     user_id = callback.from_user.id
 
-    # Отвечаем на callback, чтобы убрать "часики"
-    await callback.answer()
+    # Получаем пользователя из БД, чтобы взять его tg_id
+    from bot.services.profile_service import ProfileService
+    svc = ProfileService(session)
+    user = await svc.get_by_tg_id(user_id)
 
-    # Редактируем сообщение, убираем кнопки
+    if not user:
+        await callback.answer("Ошибка: пользователь не найден")
+        return
+
+    await callback.answer()
     await callback.message.edit_reply_markup(reply_markup=None)
 
     payment_url = await create_payment(
@@ -67,14 +72,13 @@ async def handle_subscription_plan(callback: CallbackQuery, session: AsyncSessio
             f"⚡ После оплаты подписка активируется автоматически.\n\n"
             f"🔁 Вернитесь в бот после оплаты и нажмите /start для обновления статуса",
             parse_mode="HTML",
-            reply_markup=main_menu_kb(),
+            reply_markup=main_menu_kb_with_webapp(user.tg_id),  # ← передаём tg_id
         )
     else:
         await callback.message.answer(
             "❌ Ошибка при создании платежа. Попробуйте позже.",
-            reply_markup=main_menu_kb(),
+            reply_markup=main_menu_kb_with_webapp(user.tg_id),  # ← передаём tg_id
         )
-
 
 @router.callback_query(F.data == "check_payment")
 async def check_payment(callback: CallbackQuery):

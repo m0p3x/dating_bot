@@ -47,6 +47,13 @@ class SearchService:
             ignore_city: bool = False,
     ) -> Optional[User]:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.VIEWED_TTL_HOURS)
+        viewed_check = await self.session.execute(
+            select(Viewed).where(Viewed.viewer_id == viewer.id)
+        )
+        all_viewed = viewed_check.scalars().all()
+        print(f"DEBUG get_next_profile: viewer.id={viewer.id}, total viewed in DB={len(all_viewed)}, cutoff={cutoff}")
+        for v in all_viewed:
+            print(f"  viewed_id={v.viewed_id}, created_at={v.created_at}, passes_cutoff={v.created_at >= cutoff}")
 
         viewed_subq = (
             select(Viewed.viewed_id)
@@ -94,7 +101,7 @@ class SearchService:
 
         # Дополнительные фильтры
         city_condition = None
-        if not ignore_city and viewer.city:  # ← добавить параметр ignore_city в метод
+        if not ignore_city and viewer.city:
             city_condition = (func.lower(User.city) == viewer.city.lower())
 
         age_min = viewer.age - settings.AGE_FILTER_RANGE
@@ -195,3 +202,36 @@ class SearchService:
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    # ✅ МЕТОД get_feed_batch ВНУТРИ КЛАССА
+    async def get_feed_batch(
+        self,
+        viewer: User,
+        limit: int = 10,
+        search_gender: Optional[str] = None,
+        search_goal: Optional[str] = None,
+        search_interests: Optional[List[str]] = None,
+        apply_height: bool = False,
+        search_height: Optional[int] = None,
+        ignore_city: bool = False,
+    ) -> List[User]:
+        """
+        Простой последовательный сбор анкет (без пагинации, но с правильной фильтрацией)
+        """
+        results = []
+        for _ in range(limit):
+            candidate = await self.get_next_profile(
+                viewer=viewer,
+                search_gender=search_gender,
+                search_goal=search_goal,
+                search_interests=search_interests,
+                apply_height=apply_height,
+                search_height=search_height,
+                ignore_city=ignore_city,
+            )
+            if not candidate:
+                break
+            results.append(candidate)
+            # Помечаем как просмотренное, чтобы следующий вызов get_next_profile его пропустил
+            await self.mark_viewed(viewer.id, candidate.id)
+        return results

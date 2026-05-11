@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.states import FindCompany
 from bot.keyboards import (
     company_mode_kb, company_categories_kb, company_confirm_kb,
-    company_event_kb, company_my_event_kb, main_menu_kb
+    company_event_kb, company_my_event_kb, main_menu_kb_with_webapp
 )
 from bot.services.profile_service import ProfileService
 from bot.services.event_service import EventService
@@ -26,9 +26,15 @@ async def enter_company_mode(message: Message, state: FSMContext, session: Async
     await message.answer("👥 Режим «Найти компанию»\n\n📌 Создайте встречу или найдите существующую.", reply_markup=company_mode_kb())
 
 @router.message(F.text == "🔙 Выйти из режима")
-async def exit_company_mode(message: Message, state: FSMContext):
+async def exit_company_mode(message: Message, state: FSMContext, session: AsyncSession):
     await state.set_state(None)
-    await message.answer("Вы вернулись в режим знакомств.", reply_markup=main_menu_kb())
+    # Нужно получить текущего пользователя
+    svc = ProfileService(session)
+    user = await svc.get_by_tg_id(message.from_user.id)
+    if user:
+        await message.answer("Вы вернулись в режим знакомств.", reply_markup=main_menu_kb_with_webapp(user.tg_id))
+    else:
+        await message.answer("Вы вернулись в режим знакомств.", reply_markup=main_menu_kb())
 
 # ---------- Создание встречи ----------
 @router.message(FindCompany.browsing_categories, F.text == "➕ Создать встречу")

@@ -1,12 +1,14 @@
 from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
+from bot.keyboards import main_menu_kb_with_webapp
 from bot.utils.cities import normalize_city, city_from_coords
 from bot.states import Registration
 from bot.keyboards import (
-    skip_kb, remove_kb, gender_kb, goal_kb, interests_kb, main_menu_kb,
+    skip_kb, remove_kb, gender_kb, goal_kb, interests_kb,
     INTERESTS_LIST, photo_kb, city_kb, terms_kb
 )
 from bot.services.profile_service import ProfileService
@@ -21,6 +23,12 @@ router = Router()
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, session: AsyncSession):
+    args = message.text.split()
+    if len(args) > 1 and args[1].startswith("user_"):
+        user_id = args[1].replace("user_", "")
+        await message.answer(
+            f"👤 Профиль пользователя: {user_id}\n\nСвяжитесь с ним в Telegram по этой ссылке: tg://user?id={user_id}")
+        return
     # Проверяем реферальный код
     args = message.text.split()
     referrer_code = None
@@ -33,12 +41,10 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession):
 
     svc = ProfileService(session)
     if await svc.exists(message.from_user.id):
-        from bot.utils.formatters import format_profile
         user = await svc.get_by_tg_id(message.from_user.id)
         await message.answer(
-            f"С возвращением, <b>{user.name}</b>! 👋",
-            parse_mode="HTML",
-            reply_markup=main_menu_kb(),
+            f"С возвращением, {user.name}! 👋",
+            reply_markup=main_menu_kb_with_webapp(user.tg_id)
         )
         return
 
@@ -287,7 +293,7 @@ async def _ask_photo(message: Message, state: FSMContext):
     await state.set_state(Registration.photo)
     await state.update_data(photos=[])
     await message.answer(
-        "📸 Отправь своё фото/видео (до 15с), до 3 штук.\n"
+        "📸 Отправь своё фото (1 штуку).\n"
         "Когда закончишь — нажми «Готово».\n\n"
         "Или нажми «Пропустить».",
         reply_markup=photo_kb(),
@@ -301,27 +307,27 @@ async def _ask_photo(message: Message, state: FSMContext):
 async def reg_photo_receive(message: Message, state: FSMContext):
     data = await state.get_data()
     media: list = data.get("photos", [])
-    if len(media) >= 3:
-        await message.answer("Максимум 3 файла. Напиши «Готово».")
+    if len(media) >= 1:
+        await message.answer("Максимум 1 фото")
         return
     media.append({"file_id": message.photo[-1].file_id, "type": "photo"})
     await state.update_data(photos=media)
-    await message.answer(f"Фото добавлено ({len(media)}/3). Ещё или напиши «Готово».")
+    await message.answer(f"Фото добавлено 1/3). Напиши «Готово».")
 
 
-@router.message(Registration.photo, F.video)
-async def reg_video_receive(message: Message, state: FSMContext):
-    data = await state.get_data()
-    media: list = data.get("photos", [])
-    if len(media) >= 3:
-        await message.answer("Максимум 3 файла. Напиши «Готово».")
-        return
-    if message.video.duration > 15:
-        await message.answer("⚠️ Видео слишком длинное. Максимум — 15 секунд.")
-        return
-    media.append({"file_id": message.video.file_id, "type": "video"})
-    await state.update_data(photos=media)
-    await message.answer(f"Видео добавлено ({len(media)}/3). Ещё или напиши «Готово».")
+# @router.message(Registration.photo, F.video)
+# async def reg_video_receive(message: Message, state: FSMContext):
+#     data = await state.get_data()
+#     media: list = data.get("photos", [])
+#     if len(media) >= 3:
+#         await message.answer("Максимум 3 файла. Напиши «Готово».")
+#         return
+#     if message.video.duration > 15:
+#         await message.answer("⚠️ Видео слишком длинное. Максимум — 15 секунд.")
+#         return
+#     media.append({"file_id": message.video.file_id, "type": "video"})
+#     await state.update_data(photos=media)
+#     await message.answer(f"Видео добавлено ({len(media)}/3). Ещё или напиши «Готово».")
 
 @router.message(Registration.photo, F.text.in_({"Готово", "готово", "Пропустить"}))
 async def reg_photo_done(message: Message, state: FSMContext, session: AsyncSession):
@@ -421,14 +427,10 @@ async def _finish_registration(message: Message, state: FSMContext, session: Asy
         await referral_svc.grant_referral_bonus(user.id, message.bot)
 
     await state.set_state(None)
-    await callback.message.answer(
-        "🎉 Анкета создана! Добро пожаловать.\n\n"
-        "Нажми «🔍 Смотреть анкеты» чтобы начать знакомства.\n\n"
-        "❗️ <b>ПОМНИ!</b> что анкеты будут показываться по твоим фильтрам, но если анкеты закончатся, "
-        "то фильтры будут убираться по порядку: рост, интересы, цель, возраст, город "
-        "(после города будут показываться анкеты из других городов).",
+    await message.answer(
+        "🎉 Анкета создана! Добро пожаловать...",
         parse_mode="HTML",
-        reply_markup=main_menu_kb(),
+        reply_markup=main_menu_kb_with_webapp(user.tg_id),
     )
 
 async def _finish_registration_from_callback(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
@@ -480,10 +482,19 @@ async def _finish_registration_from_callback(callback: CallbackQuery, state: FSM
     await state.set_state(None)
     await callback.message.answer(
         "🎉 Анкета создана! Добро пожаловать.\n\n"
-        "Нажми «🔍 Смотреть анкеты» чтобы начать знакомства.\n\n"
+        "Нажми «Открыть Mini app» внизу, чтобы начать знакомства.\n\n"
         "❗️ <b>ПОМНИ!</b> что анкеты будут показываться по твоим фильтрам, но если анкеты закончатся, "
-        "то фильтры будут убираться по порядку: рост, интересы, цель, возраст, город "
-        "(после города будут показываться анкеты из других городов).",
+        "то фильтры будут убираться по порядку: рост, интересы, цель, возраст",
         parse_mode="HTML",
-        reply_markup=main_menu_kb(),
+        reply_markup=main_menu_kb_with_webapp(user.tg_id),
     )
+
+@router.message(CommandStart(deep_link=True))
+async def start_with_deeplink(message: Message, state: FSMContext, session: AsyncSession):
+    args = message.text.split()
+    if len(args) > 1 and args[1] == "company":
+        # Переключить пользователя в режим «Найти компанию» (как если бы нажал кнопку в боте)
+        await message.answer("👥 Режим «Найти компанию»...")
+        # Здесь запускайте существующую логику из company.py
+        return
+    # обычная регистрация
