@@ -228,7 +228,9 @@ class MatchService:
             else:
                 text = "❤️ <b>Кто-то оценил вашу анкету!</b>"
 
-            web_app_url = "https://gazdatingbot.ru/#likes"
+            # Передаём tg_id лайкнувшего через start_param — Mini App откроет его анкету сразу.
+            # start_param попадает в tg.initDataUnsafe.start_param на клиенте.
+            web_app_url = f"https://gazdatingbot.ru/?startapp=like_from_{from_user.tg_id}#likes"
             reply_markup = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
                     text="👀 Посмотреть в приложении",

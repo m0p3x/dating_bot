@@ -281,7 +281,7 @@ async def edit_name(message: Message, state: FSMContext, session: AsyncSession):
     svc = ProfileService(session)
     await svc.update_field(message.from_user.id, name=name)
     await state.set_state(None)
-    await message.answer("✅ Имя обновлено!", reply_markup=main_menu_kb_with_webapp())
+    await message.answer("✅ Имя обновлено!", reply_markup=main_menu_kb_with_webapp(user.tg_id))
 
 
 @router.message(EditProfile.age)
@@ -292,7 +292,7 @@ async def edit_age(message: Message, state: FSMContext, session: AsyncSession):
     svc = ProfileService(session)
     await svc.update_field(message.from_user.id, age=int(message.text))
     await state.set_state(None)
-    await message.answer("✅ Возраст обновлён!", reply_markup=main_menu_kb_with_webapp())
+    await message.answer("✅ Возраст обновлён!", reply_markup=main_menu_kb_with_webapp(user.tg_id))
 
 
 @router.message(EditProfile.height, F.text == "Пропустить")
@@ -300,7 +300,7 @@ async def edit_height_skip(message: Message, state: FSMContext, session: AsyncSe
     svc = ProfileService(session)
     await svc.update_field(message.from_user.id, height=None)
     await state.set_state(None)
-    await message.answer("✅ Рост убран.", reply_markup=main_menu_kb_with_webapp())
+    await message.answer("✅ Рост убран.", reply_markup=main_menu_kb_with_webapp(user.tg_id))
 
 
 @router.message(EditProfile.height)
@@ -311,7 +311,7 @@ async def edit_height(message: Message, state: FSMContext, session: AsyncSession
     svc = ProfileService(session)
     await svc.update_field(message.from_user.id, height=int(message.text))
     await state.set_state(None)
-    await message.answer("✅ Рост обновлён!", reply_markup=main_menu_kb_with_webapp())
+    await message.answer("✅ Рост обновлён!", reply_markup=main_menu_kb_with_webapp(user.tg_id))
 
 
 from bot.utils.cities import normalize_city
@@ -334,7 +334,7 @@ async def edit_city(message: Message, state: FSMContext, session: AsyncSession):
     svc = ProfileService(session)
     await svc.update_field(message.from_user.id, city=normalized)
     await state.set_state(None)
-    await message.answer("✅ Город обновлён!", reply_markup=main_menu_kb_with_webapp())
+    await message.answer("✅ Город обновлён!", reply_markup=main_menu_kb_with_webapp(user.tg_id))
 
 
 @router.callback_query(EditProfile.goal, F.data.startswith("goal:"))
@@ -397,7 +397,7 @@ async def edit_bio_skip(message: Message, state: FSMContext, session: AsyncSessi
     svc = ProfileService(session)
     await svc.update_field(message.from_user.id, bio=None)
     await state.set_state(None)
-    await message.answer("✅ Bio убрано.", reply_markup=main_menu_kb_with_webapp())
+    await message.answer("✅ Bio убрано.", reply_markup=main_menu_kb_with_webapp(user.tg_id))
 
 
 @router.message(EditProfile.bio)
@@ -409,7 +409,7 @@ async def edit_bio(message: Message, state: FSMContext, session: AsyncSession):
     svc = ProfileService(session)
     await svc.update_field(message.from_user.id, bio=bio)
     await state.set_state(None)
-    await message.answer("✅ Bio обновлено!", reply_markup=main_menu_kb_with_webapp())
+    await message.answer("✅ Bio обновлено!", reply_markup=main_menu_kb_with_webapp(user.tg_id))
 
 
 @router.message(EditProfile.photo, F.photo)
@@ -457,7 +457,7 @@ async def edit_photo_done(message: Message, state: FSMContext, session: AsyncSes
             await svc.add_photo(user.id, item, order=i, media_type="photo")
 
     await state.set_state(None)
-    await message.answer("✅ Медиа обновлены!", reply_markup=main_menu_kb_with_webapp())
+    await message.answer("✅ Медиа обновлены!", reply_markup=main_menu_kb_with_webapp(user.tg_id))
 
 # ──────────────────────────────────────────────
 # Создать анкету заново
@@ -654,7 +654,7 @@ async def verify_video_received(message: Message, state: FSMContext, session: As
         "Обычно это занимает до 24 часов.\n\n"
         "После верификации вы получите уведомление и зеленую галочку в профиле!",
         parse_mode="HTML",
-        reply_markup=main_menu_kb_with_webapp(),
+        reply_markup=main_menu_kb_with_webapp(user.tg_id),
     )
 
 

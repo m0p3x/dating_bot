@@ -167,33 +167,63 @@ async def get_feed(
     return {"profiles": items, "has_more": len(items) == limit}
 
 
-# Кэш для путей к файлам
-file_path_cache = {}
+# Кэш file_id → готовый URL (переживает рестарт если вынести в Redis, но уже намного лучше)
+# TTL не нужен: file_path у Telegram не меняется пока файл существует
+_photo_url_cache: dict[str, str] = {}
+
+# Единая сессия aiohttp на всё приложение (создаётся при старте)
+_http_session: aiohttp.ClientSession | None = None
 
 
-async def get_file_path(bot_token: str, file_id: str) -> str:
-    if file_id in file_path_cache:
-        return file_path_cache[file_id]
+@app.on_event("startup")
+async def _create_http_session():
+    global _http_session
+    _http_session = aiohttp.ClientSession()
 
-    url = f"https://api.telegram.org/bot{bot_token}/getFile?file_id={file_id}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
+
+@app.on_event("shutdown")
+async def _close_http_session():
+    if _http_session:
+        await _http_session.close()
+
+
+async def _resolve_photo_url(file_id: str) -> str | None:
+    """Возвращает прямой URL файла на Telegram CDN, кэширует результат."""
+    if file_id in _photo_url_cache:
+        return _photo_url_cache[file_id]
+
+    bot_token = settings.BOT_TOKEN
+    api_url = f"https://api.telegram.org/bot{bot_token}/getFile?file_id={file_id}"
+    try:
+        async with _http_session.get(api_url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
             data = await resp.json()
             if data.get("ok"):
                 file_path = data["result"]["file_path"]
-                file_path_cache[file_id] = file_path
-                return file_path
+                cdn_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+                _photo_url_cache[file_id] = cdn_url
+                return cdn_url
+    except Exception:
+        pass
     return None
 
 
 @app.get("/api/photo/{file_id}")
 async def get_photo(file_id: str):
-    bot_token = settings.BOT_TOKEN
-    file_path = await get_file_path(bot_token, file_id)
-    if not file_path:
+    """
+    Редирект на Telegram CDN с агрессивным браузерным кэшированием.
+    Браузер закэширует URL на 24 часа — повторные запросы того же фото
+    не дойдут до сервера вообще.
+    """
+    cdn_url = await _resolve_photo_url(file_id)
+    if not cdn_url:
         raise HTTPException(status_code=404, detail="File not found")
-    file_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
-    return RedirectResponse(url=file_url)
+    return RedirectResponse(
+        url=cdn_url,
+        status_code=301,  # 301 (permanent) кэшируется браузером, 302 — нет
+        headers={
+            "Cache-Control": "public, max-age=86400",  # 24 часа
+        },
+    )
 
 
 # стало
@@ -263,6 +293,7 @@ async def get_matches(tg_id: int, db: AsyncSession = Depends(get_db)):
             selectinload(User.photos),
             selectinload(User.tags).selectinload(UserTag.tag)
         )
+        .order_by(Match.created_at.desc())
     )
     rows = result.all()
 
@@ -634,6 +665,66 @@ async def get_profile_by_id(
         "photos": [{"file_id": p.file_id, "type": p.media_type} for p in target_user.photos],
         "tags": [ut.tag.name for ut in target_user.tags if ut.tag],
     }
+
+class ReportRequest(BaseModel):
+    from_tg_id: int
+    to_tg_id: int
+    reason: str               # spam | offensive | fake | other
+    comment: Optional[str] = None
+
+
+@app.post("/api/report")
+async def submit_report(data: ReportRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Принять жалобу из Mini App и сохранить через ReportService.
+    reason: spam | offensive | fake | other
+    """
+    from bot.services.report_service import ReportService
+
+    allowed_reasons = {"spam", "offensive", "fake", "other"}
+    if data.reason not in allowed_reasons:
+        raise HTTPException(status_code=400, detail="Invalid reason")
+
+    svc = ProfileService(db)
+    reporter = await svc.get_by_tg_id(data.from_tg_id)
+    if not reporter:
+        raise HTTPException(status_code=404, detail="Reporter not found")
+
+    target = await svc.get_by_tg_id(data.to_tg_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+
+    report_svc = ReportService(db)
+    report = await report_svc.create(
+        from_id=reporter.id,
+        to_id=target.id,
+        reason=data.reason,
+        comment=data.comment,
+    )
+
+    # Уведомляем администраторов так же, как это делает бот
+    try:
+        admin_ids = getattr(settings, "ADMIN_IDS", [])
+        reason_labels = {
+            "spam": "📢 Реклама / спам",
+            "offensive": "🤬 Оскорбительный контент",
+            "fake": "🎭 Фейковый профиль",
+            "other": f"💬 Другое: {data.comment or '—'}",
+        }
+        text = (
+            f"🚩 Новая жалоба на <b>{target.name}</b> (id: {target.id})\n"
+            f"Причина: {reason_labels.get(data.reason, data.reason)}"
+        )
+        for admin_id in admin_ids:
+            try:
+                await bot.send_message(admin_id, text, parse_mode="HTML")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return {"ok": True, "report_id": report.id}
+
 
 if __name__ == "__main__":
     import uvicorn

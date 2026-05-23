@@ -43,7 +43,31 @@ async function init() {
 
     renderHeader();
     renderBottomNav();
-    navigateTo(window.location.hash || '#feed');
+
+    // Если открыто по уведомлению о лайке — сразу показываем анкету лайкнувшего.
+    // Telegram WebApp передаёт параметр через tg.initDataUnsafe.start_param,
+    // либо он попадает в хэш (с учётом URL-энкодинга ? → %3F).
+    let openFromTgId = null;
+
+    // Способ 1: start_param (надёжнее всего в Telegram)
+    const startParam = tg.initDataUnsafe?.start_param || '';
+    const startMatch = startParam.match(/^like_from_(\d+)$/);
+    if (startMatch) {
+        openFromTgId = parseInt(startMatch[1]);
+    }
+
+    // Способ 2: хэш — #likes?from=123 или #likes%3Ffrom=123
+    if (!openFromTgId) {
+        const rawHash = decodeURIComponent(window.location.hash);
+        const hashMatch = rawHash.match(/^#likes[?&]from=(\d+)/);
+        if (hashMatch) openFromTgId = parseInt(hashMatch[1]);
+    }
+
+    if (openFromTgId) {
+        navigateTo(`#profile/${openFromTgId}`);
+    } else {
+        navigateTo(window.location.hash || '#feed');
+    }
     window.addEventListener('hashchange', () => navigateTo(window.location.hash));
 }
 
@@ -112,14 +136,17 @@ async function loadMatches() {
             : 'https://placehold.co/300x300?text=Нет+фото';
         html += `
             <div class="card" onclick="showProfileFromMatch(${u.tg_id})" style="cursor:pointer;">
-                <div class="card-image" style="background-image: url('${photoUrl}'); height:150px; background-size:cover;"></div>
+                <div class="card-image" data-photo="${photoUrl}" style="height:150px; background-size:cover; cursor:pointer; background-color:#0D1520;"
+                    onclick="showFullImage('${photoUrl}')"></div>
                 <div class="name-age">${u.name}, ${u.age} ${u.is_verified ? '✅' : ''}</div>
                 <div class="city">📍 ${u.city || '—'}</div>
                 <div class="contact"><a href="${telegramLink}" target="_blank">✉️ Написать в Telegram</a></div>
             </div>
         `;
+    applyPhotosToCards();
     }
     content.innerHTML = html;
+    applyPhotosToCards();
 }
 
 function showProfileFromMatch(tg_id) {
@@ -162,22 +189,25 @@ async function showForeignProfile(tg_id) {
                 <button class="like-btn" onclick="replyFromProfile(${data.tg_id})">❤️ Лайк</button>
                 <button class="skip-btn" onclick="skipFromProfile(${data.tg_id})">⏭ Пропуск</button>
                 <button class="back-btn" onclick="backToLikes()">🔙 Назад</button>
+                <button class="report-btn" onclick="openReportModal(${data.tg_id})">🚩 Жалоба</button>
             </div>
         `;
     }
 
     content.innerHTML = `
         <div class="card">
-            <div class="card-image" style="background-image: url('${photoUrl}'); height:300px; background-size:cover;"></div>
+            <div class="card-image" id="card-img-main" data-photo="${photoUrl}" style="height:300px; background-size:cover; background-position:center; cursor:pointer; background-color:#0D1520;"
+                onclick="showFullImage('${photoUrl}')"></div>
             <div class="name-age">${data.name}, ${data.age} ${data.is_verified ? '✅' : ''}</div>
             <div class="city">📍 ${data.city || '—'}</div>
             ${data.height ? `<div class="height">📏 ${data.height} см</div>` : ''}
             <div class="goal">🎯 ${data.goal || 'не указана'}</div>
             <div class="tags">${(data.tags||[]).map(t=>`<span class="tag">#${t}</span>`).join('')}</div>
             <div class="bio">${data.bio || ''}</div>
-            ${actionsHtml}
         </div>
+        ${actionsHtml}
     `;
+    applyPhotosToCards();
 }
 
 function backToMatches() {
@@ -278,10 +308,16 @@ function toggleFilters() {
     panel.style.cssText = `
         position: fixed; top: 60px; left: 0; right: 0;
         background: var(--tg-theme-secondary-bg-color, #1e1e1e);
-        padding: 20px; border-radius: 0 0 20px 20px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 200;
-        display: flex; flex-direction: column; gap: 16px;
-        max-height: 80vh; overflow-y: auto;
+        padding: 15px;
+        padding-bottom: 80px;  /* ← ДОБАВИТЬ ЭТУ СТРОКУ */
+        border-radius: 0 0 20px 20px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        z-index: 200;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-height: 90vh;
+        overflow-y: auto;
     `;
 
     let interestsHtml = '';
@@ -329,7 +365,7 @@ function toggleFilters() {
             <small style="color:#888;">Нажмите на интерес, чтобы добавить/убрать</small>
         </div>
 
-        <div style="display:flex; gap:12px; margin-top:8px;">
+        <div style="display:flex; gap:12px; margin-top:8px; margin-bottom:10px;">
             <button id="applyFilterBtn" style="flex:1; background:#00d4ff; border:none; border-radius:30px; padding:12px; font-weight:bold;">🔍 Искать</button>
             <button id="closeFilterBtn" style="flex:1; background:#2a2a2a; border:none; border-radius:30px; padding:12px; color:#fff;">✖️ Закрыть</button>
         </div>
@@ -344,6 +380,37 @@ function toggleFilters() {
 
     document.getElementById('applyFilterBtn').onclick = () => applyFilters();
     document.getElementById('closeFilterBtn').onclick = () => closeFilters();
+}
+
+function showFullImage(photoUrl) {
+    const modal = document.createElement('div');
+    modal.id = 'imageModal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.95);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+    `;
+    modal.onclick = () => modal.remove();
+
+    const img = document.createElement('img');
+    img.src = photoUrl;
+    img.style.cssText = `
+        max-width: 90%;
+        max-height: 90%;
+        object-fit: contain;
+        border-radius: 8px;
+    `;
+
+    modal.appendChild(img);
+    document.body.appendChild(modal);
 }
 
 function closeFilters() {
@@ -408,7 +475,8 @@ async function loadFeed() {
         : 'https://placehold.co/300x300?text=Нет+фото';
     content.innerHTML = `
         <div class="card">
-            <div class="card-image" style="background-image: url('${photoUrl}'); height:300px; background-size:cover; background-position:center;"></div>
+            <div class="card-image" id="card-img-main" data-photo="${photoUrl}" style="height:300px; background-size:cover; background-position:center; cursor:pointer; background-color:#0D1520;"
+                onclick="showFullImage('${photoUrl}')"></div>
             <div class="name-age">${p.name}, ${p.age} ${p.is_verified ? '✅' : ''} ${p.has_premium ? '⭐' : ''}</div>
             <div class="city">📍 ${p.city || '—'}</div>
             ${p.height ? `<div class="height">📏 ${p.height} см</div>` : ''}
@@ -416,13 +484,15 @@ async function loadFeed() {
             <div class="tags">${(p.tags||[]).map(t=>`<span class="tag">#${t}</span>`).join('')}</div>
             <div class="bio">${p.bio || ''}</div>
             <div class="actions">
-                ${prevProfileId ? `<button class="undo-btn" onclick="undoSkip()">↩️ Вернуться</button>` : ''}
+                ${prevProfileId ? `<button class="undo-btn" onclick="undoSkip()">↩️ Назад</button>` : ''}
                 <button class="like-btn" onclick="likeProfile(${p.tg_id})">❤️ Лайк</button>
-                <button class="super-btn" onclick="superLike(${p.tg_id})">⭐ Супер</button>
                 <button class="skip-btn" onclick="skipProfile(${p.id})">⏭ Пропуск</button>
+                <button class="super-btn" onclick="superLike(${p.tg_id})">⭐ Супер</button>
+                <button class="report-btn" onclick="openReportModal(${p.tg_id})">🚩 Жалоба</button>
             </div>
         </div>
     `;
+    applyPhotosToCards();
 }
 
 async function showProfileById(profileId) {
@@ -444,20 +514,23 @@ async function showProfileById(profileId) {
 
     content.innerHTML = `
         <div class="card">
-            <div class="card-image" style="background-image: url('${photoUrl}'); height:300px; background-size:cover; background-position:center;"></div>
+            <div class="card-image" id="card-img-main" data-photo="${photoUrl}" style="height:300px; background-size:cover; cursor:pointer; background-color:#0D1520;"
+                onclick="showFullImage('${photoUrl}')"></div>
             <div class="name-age">${profile.name}, ${profile.age} ${profile.is_verified ? '✅' : ''} ${profile.has_premium ? '⭐' : ''}</div>
             <div class="city">📍 ${profile.city || '—'}</div>
             ${profile.height ? `<div class="height">📏 ${profile.height} см</div>` : ''}
             <div class="goal">🎯 ${profile.goal || 'не указана'}</div>
             <div class="tags">${(profile.tags||[]).map(t=>`<span class="tag">#${t}</span>`).join('')}</div>
             <div class="bio">${profile.bio || ''}</div>
-            <div class="actions">
-                <button class="like-btn" onclick="likeProfile(${profile.tg_id})">❤️ Лайк</button>
-                <button class="super-btn" onclick="superLike(${profile.tg_id})">⭐ Супер</button>
-                <button class="skip-btn" onclick="skipProfile(${profile.id})">⏭ Пропуск</button>
-            </div>
+        </div>
+        <div class="actions">
+            <button class="like-btn" onclick="likeProfile(${profile.tg_id})">❤️ Лайк</button>
+            <button class="super-btn" onclick="superLike(${profile.tg_id})">⭐ Супер</button>
+            <button class="skip-btn" onclick="skipProfile(${profile.id})">⏭ Пропуск</button>
+            <button class="report-btn" onclick="openReportModal(${profile.tg_id})">🚩 Жалоба</button>
         </div>
     `;
+    applyPhotosToCards();
 }
 
 async function undoSkip() {
@@ -555,6 +628,7 @@ async function loadLikes() {
         `;
     }
     content.innerHTML = html;
+    applyPhotosToCards();
 }
 
 async function showProfileFromLike(tg_id, like_id) {
@@ -590,7 +664,7 @@ async function loadMyProfile() {
 
     document.getElementById('content').innerHTML = `
         <div class="card">
-            <div class="card-image" style="background-image: url('${photoUrl}'); height:300px; background-size:cover; background-position:center;"></div>
+            <div class="card-image" id="card-img-main" data-photo="${photoUrl}" style="height:300px; background-size:cover; background-position:center; background-color:#0D1520;"></div>
             <div class="name-age">${data.name}, ${data.age} ${data.is_verified ? '✅' : ''} ${data.has_premium ? '⭐' : ''}</div>
             <div class="city">📍 ${data.city || '—'}</div>
             ${data.height ? `<div class="height">📏 ${data.height} см</div>` : ''}
@@ -603,6 +677,7 @@ async function loadMyProfile() {
             </div>
         </div>
     `;
+    applyPhotosToCards();
 }
 
 function openCompanyMode() {
@@ -943,6 +1018,150 @@ function applyTheme(themeName) {
     }, 400);
 }
 
+// ─── Жалоба ───────────────────────────────────────────────────────────────────
+
+const REPORT_REASONS = [
+    { key: 'spam',      label: '📢 Реклама / спам' },
+    { key: 'offensive', label: '🤬 Оскорбительный контент' },
+    { key: 'fake',      label: '🎭 Фейковый профиль' },
+    { key: 'other',     label: '💬 Другое' },
+];
+
+function openReportModal(targetTgId) {
+    document.getElementById('reportModal')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'reportModal';
+    overlay.style.cssText = `
+        position: fixed; inset: 0;
+        background: rgba(0,0,0,0.7);
+        z-index: 5000;
+        display: flex; align-items: center; justify-content: center;
+        padding: 20px;
+    `;
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    const reasonButtons = REPORT_REASONS.map(r => `
+        <button
+            class="report-reason-btn"
+            data-key="${r.key}"
+            onclick="selectReportReason(this, '${r.key}', ${targetTgId})"
+            style="
+                display:block; width:100%; margin:6px 0; padding:12px 14px;
+                background: transparent; border: 1px solid var(--seam);
+                border-radius: 10px; color: var(--text-hi); cursor: pointer;
+                font-family: var(--mono); font-size: 14px; text-align: left;
+                transition: background 0.15s;
+            "
+            onmouseover="this.style.background='rgba(255,255,255,0.08)'"
+            onmouseout="this.style.background='transparent'"
+        >${r.label}</button>
+    `).join('');
+
+    overlay.innerHTML = `
+        <div style="
+            background: var(--panel); border: 1px solid var(--seam);
+            border-radius: 16px; padding: 22px; width: 100%; max-width: 340px;
+            box-shadow: 0 0 40px rgba(0,0,0,0.6);
+        ">
+            <h3 style="margin:0 0 14px; text-align:center; color:var(--text-hi);">🚩 Причина жалобы</h3>
+            ${reasonButtons}
+            <div id="reportCommentBlock" style="display:none; margin-top:10px;">
+                <textarea id="reportCommentText"
+                    placeholder="Опишите ситуацию (необязательно)..."
+                    maxlength="300"
+                    style="
+                        width:100%; box-sizing:border-box; padding:10px; border-radius:10px;
+                        border:1px solid var(--seam); background:var(--panel2);
+                        color:var(--text-hi); font-family:var(--mono); font-size:13px;
+                        resize:vertical; min-height:80px;
+                    "
+                ></textarea>
+                <button
+                    onclick="submitReport(${targetTgId}, 'other')"
+                    style="
+                        display:block; width:100%; margin-top:8px; padding:12px;
+                        background: var(--magenta); border:none; border-radius:10px;
+                        color:#fff; font-family:var(--mono); font-size:14px; cursor:pointer;
+                    "
+                >📨 Отправить жалобу</button>
+            </div>
+            <button
+                onclick="document.getElementById('reportModal').remove()"
+                style="
+                    display:block; width:100%; margin-top:10px; padding:10px;
+                    background:rgba(255,255,255,0.07); border:1px solid var(--seam);
+                    border-radius:10px; color:var(--text-lo); cursor:pointer;
+                    font-family:var(--mono); font-size:12px;
+                "
+            >✖️ Отмена</button>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+}
+
+function selectReportReason(btn, reason, targetTgId) {
+    if (reason === 'other') {
+        // Показываем поле для комментария
+        document.getElementById('reportCommentBlock').style.display = 'block';
+        // Подсвечиваем выбранную кнопку
+        document.querySelectorAll('.report-reason-btn').forEach(b => b.style.background = 'transparent');
+        btn.style.background = 'rgba(255,255,255,0.12)';
+    } else {
+        submitReport(targetTgId, reason);
+    }
+}
+
+async function submitReport(targetTgId, reason) {
+    const comment = reason === 'other'
+        ? (document.getElementById('reportCommentText')?.value?.trim() || null)
+        : null;
+
+    const resp = await fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            from_tg_id: user.id,
+            to_tg_id: targetTgId,
+            reason,
+            comment,
+        })
+    });
+
+    document.getElementById('reportModal')?.remove();
+
+    if (resp.ok) {
+        tg.showAlert('✅ Жалоба отправлена. Мы рассмотрим её в ближайшее время.');
+        // Пропускаем анкету, на которую пожаловались
+        if (currentPage === 'feed' && currentProfileId) {
+            await skipProfile(currentProfileId);
+        }
+    } else {
+        tg.showAlert('❌ Не удалось отправить жалобу. Попробуй позже.');
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+
 applyTheme(currentTheme);
+
+// ─── Photo preloader ──────────────────────────────────────────────────────────
+// Вызывается после любого рендера карточки.
+// Находит все [data-photo] элементы, загружает фото через Image(),
+// и только после загрузки ставит background-image — без мигания.
+function applyPhotosToCards() {
+    document.querySelectorAll('[data-photo]').forEach(el => {
+        const url = el.dataset.photo;
+        if (!url) return;
+        const img = new Image();
+        img.onload = () => {
+            el.style.backgroundImage = `url('${url}')`;
+            el.style.backgroundColor = 'transparent';
+        };
+        img.src = url;
+    });
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 init();

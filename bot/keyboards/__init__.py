@@ -2,6 +2,7 @@ from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
 )
+import time
 from aiogram.types import WebAppInfo
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
@@ -350,7 +351,7 @@ def company_my_event_kb(event_id: int) -> InlineKeyboardMarkup:
 
 def main_menu_kb_with_webapp(user_tg_id: int) -> ReplyKeyboardMarkup:
     builder = ReplyKeyboardBuilder()
-    url = f"https://gazdatingbot.ru/?tg_id={user_tg_id}"
+    url = f"https://gazdatingbot.ru/?tg_id={user_tg_id}&v={int(time.time())}"
     builder.button(text="🚀 Открыть Mini App", web_app=WebAppInfo(url=url))
     builder.button(text="👤 Мой профиль")
     builder.button(text="👥 Найти компанию")
